@@ -1,0 +1,336 @@
+### Setzen des Arbeitsverzeichnisses
+setwd("f:/bibliothek/studium/conjoint analyse/")
+
+### Einlesen benoetigter Packages
+library("ggplot2")
+library("dplyr")
+library("xlsx")
+library("mlogit")
+library("ChoiceModelR")
+
+#Bayes
+## Einlesen der im CSV-Format gesicherten Datensaetze
+dmz <- read.csv2("Design mit Zeitdruck.csv", stringsAsFactors = F)
+ymz <- read.csv2("yZeitdruck.csv", stringsAsFactors = F)
+
+## Mit Zeitdruck
+#Einfuegen von Druckern, die die None-Option repraesentieren
+dmzMitNoneOption <- as.data.frame(matrix(rep(NA, nrow(dmz)/4*5*ncol(dmz)), ncol = ncol(dmz)))
+counter = 0
+for (i in 1:(nrow(dmz)/4*5)) {
+  if (i %% 5 == 0) {
+    dmzMitNoneOption[i,1] <- 9999
+    dmzMitNoneOption[i,2] <- dmz[i-1-counter,2]
+    dmzMitNoneOption[i,3] <- dmz[i-1-counter,3]
+    dmzMitNoneOption[i,4] <- 5
+    dmzMitNoneOption[i,5] <- 0
+    dmzMitNoneOption[i,6] <- 0
+    dmzMitNoneOption[i,7] <- 0
+    dmzMitNoneOption[i,8] <- 0
+    dmzMitNoneOption[i,9] <- 0
+    dmzMitNoneOption[i,10] <- 0
+    dmzMitNoneOption[i,11] <- 0
+    counter <- counter + 1
+  } else {
+    for (j in 1:ncol(dmz)) {
+      dmzMitNoneOption[i,j] <- dmz[i-counter,j]
+    }
+  }
+}
+
+names(dmzMitNoneOption) <- names(dmz)
+
+dmz <- dmzMitNoneOption
+
+for (i in 1:nrow(dmz)) {
+  dmz[i,1] <- i
+}
+
+dmz <- dmz %>%
+  mutate(Doppelseite = as.factor(ifelse(Att.1...Doppelseitiges.Drucken == 1, "nein", ifelse(Att.1...Doppelseitiges.Drucken == 2, "ja", 0)))) %>% #Fuegt eine Spalte hinzu, in der die Auspraegungen der Variable Doppelseite ja oder nein sind
+  mutate(Scan = as.factor(ifelse(Att.2...Scan.Funktion == 1, "nein", ifelse(Att.2...Scan.Funktion == 2, "ja", 0)))) %>% #S.o., Auspraegungen sind ebenfalls ja oder nein
+  mutate(Eco = as.factor(ifelse(Att.3...Eco.Modus == 1, "nein", ifelse(Att.3...Eco.Modus == 2, "ja", "a")))) %>% #S.o., Auspraegungen sind ebenfalls ja oder nein
+  mutate(KpS = as.factor(ifelse(Att.4...Kosten.pro.Seite..in.cent. == 1, "1 Cent", ifelse(Att.4...Kosten.pro.Seite..in.cent. == 2, "2 Cent", ifelse(Att.4...Kosten.pro.Seite..in.cent. == 3, "3 Cent", "a"))))) %>% #S.o., mit den Auspraegungen 1 Cent, 2 Cent oder 3 Cent
+  mutate(Loch = as.factor(ifelse(Att.5...Heft..und.Lochfunktion == 1, "nein", ifelse(Att.5...Heft..und.Lochfunktion == 2, "ja", "a")))) %>% #S.o., mit den Auspraegungen ja oder nein
+  mutate(Sterne = as.factor(ifelse(Att.6...Sterne.Bewertung.von.1..schlecht..bis.5..gut. == 1, "2 Sterne",
+                           ifelse(Att.6...Sterne.Bewertung.von.1..schlecht..bis.5..gut. == 2, "3 Sterne",
+                           ifelse(Att.6...Sterne.Bewertung.von.1..schlecht..bis.5..gut. == 3, "4 Sterne", 
+                           ifelse(Att.6...Sterne.Bewertung.von.1..schlecht..bis.5..gut. == 4, "4.5 Sterne", "a")))))) %>% #S.o., mit den Auspraegungen 2 Sterne, 3 Sterne, 4 Sterne oder 4,5 Sterne
+  mutate(Preis = as.factor(ifelse(Att.7...Preis == 1, "198 Euro",
+                           ifelse(Att.7...Preis == 2, "220 Euro",
+                           ifelse(Att.7...Preis == 3, "233 Euro", 
+                           ifelse(Att.7...Preis == 4, "258 Euro",
+                           ifelse(Att.7...Preis == 5, "290 Euro", "a"))))))) %>% #S.o., mit den Auspraegungen 198 Euro, 220 Euro, 233 Euro, 258 Euro oder 290 Euro
+  mutate(Choice = NA) %>% #Hinzufuegen einer Spalte, die spaeter aussagt, ob das Produkt gewaehlt wurde oder nicht (moegliche Auspraegungen dann 0 oder 1)
+  rename(i = X, ID = Version..0...Fixed.Task.) %>% #Um handlichere Namen zu bekommen
+  select(-Att.1...Doppelseitiges.Drucken, -Att.2...Scan.Funktion, -Att.3...Eco.Modus, -Att.4...Kosten.pro.Seite..in.cent., -Att.5...Heft..und.Lochfunktion, -Att.6...Sterne.Bewertung.von.1..schlecht..bis.5..gut., -Att.7...Preis) #Loeschen der vorherigen (numerischen) Variablen, um Übersichtlichkeit zu gewinnen
+
+### Recodieren der Antworten von 4 auf 0, da spaeter mit dem Rest der Division gerechnet wird + Sortieren des Datensatzes
+ymz <- ymz %>%
+  mutate(CBC1_Random1 = ifelse(CBC1_Random1 == 5, 0, CBC1_Random1)) %>%
+  mutate(CBC1_Random2 = ifelse(CBC1_Random2 == 5, 0, CBC1_Random2)) %>%
+  mutate(CBC1_Random3 = ifelse(CBC1_Random3 == 5, 0, CBC1_Random3)) %>%
+  mutate(CBC1_Random4 = ifelse(CBC1_Random4 == 5, 0, CBC1_Random4)) %>%
+  mutate(CBC1_Random5 = ifelse(CBC1_Random5 == 5, 0, CBC1_Random5)) %>%
+  mutate(CBC1_Random6 = ifelse(CBC1_Random6 == 5, 0, CBC1_Random6)) %>%
+  mutate(CBC1_Random7 = ifelse(CBC1_Random7 == 5, 0, CBC1_Random7)) %>%
+  mutate(CBC1_Random8 = ifelse(CBC1_Random8 == 5, 0, CBC1_Random8)) %>%
+  mutate(CBC1_Random9 = ifelse(CBC1_Random9 == 5, 0, CBC1_Random9)) %>%
+  mutate(CBC1_Random10 = ifelse(CBC1_Random10 == 5, 0, CBC1_Random10)) %>%
+  mutate(CBC1_Random11 = ifelse(CBC1_Random11 == 5, 0, CBC1_Random11)) %>%
+  mutate(CBC1_Random12 = ifelse(CBC1_Random12 == 5, 0, CBC1_Random12)) %>%
+  select(-CBC1_Fixed1, -CBC1_Fixed2, everything(), CBC1_Fixed1, CBC1_Fixed2) #Sorgt dafuer, dass die Fixed-Spalten am Ende stehen
+
+### Funktion zur Ermittlung, ob der Proband die Produktalternative gewaehlt hat oder nicht
+func <- function(i) {
+  zeile = ceiling((i - 10) / 60)
+  spalte = ifelse(ceiling(((i - 10) / 5) %% 12) == 0, 12, ceiling(((i - 10) / 5) %% 12))
+  c = ifelse(i %% 5 == ymz[zeile, spalte + 2], 1, 0)
+  return (c)
+}
+
+### Pruefen anhand der Funktion, ob der Proband die Produktalternative gewaehlt hat <- erfolgt zeilenweise
+for (i in 11:(48*nrow(ymz) + 10)) {
+  dmz$Choice[i] = func(i)
+}
+
+### Loeschen von Zeilen ohne gueltige Antwort
+dmz <- dmz %>%
+  filter(!is.na(Choice))
+
+### Schreibt in die erste Zeile eines Auswahlkatalogs die getroffene Wahl
+#### Vektor mit den getroffenen Auswahlen
+bayes <- NULL
+for (i in 1:(nrow(dmz)/5)) {
+  for (j in ((i-1)*5+1):((i-1)*5+5)) {
+    if(dmz$Choice[j] == 1) {
+        bayes <- c(bayes, j - ((i-1)*5))
+    }
+  }
+}
+
+#### Schreiben des Vektors in die erste Zeile des Auswahlkatalogs
+bayesIndex <- 1
+for (i in 1:nrow(dmz)) {
+  if (i %% 5 == 1) {
+    dmz$Choice[i] = bayes[bayesIndex]
+    bayesIndex = bayesIndex + 1
+  } else {
+    dmz$Choice[i] = 0
+  }
+}
+
+### Data Frame, in dem jede moegliche Auswahl eine Spalte darstellt (mit 0 oder 1)
+dmz.coded <- model.matrix(~ Doppelseite + Scan + Eco + KpS + Loch + Sterne + Preis, data = dmz)
+dmz.coded <- dmz.coded[, -1] #Loeschen des Intercepts
+
+dmz.data <- cbind(dmz[,2:4], dmz.coded, dmz[,12]) #Verbinden der Spalten fuer ID, Frage und Auswahl mit den Auspraegungen des jeweiligen Druckers und der Spalte mit der getroffenen Auswahl
+names(dmz.data)[length(names(dmz.data))] <- "Choice" #Umbenennen der letzten Spalte in "Choice"
+
+###Liste mit Iterationen (R und und use koennen weitestgehend beliebig manipuliert werden)
+bayesLukas <- choicemodelr(data = dmz.data, xcoding=rep(1,20), mcmc = list(R = 10000, use = 5000), options = list(save = T))
+
+### Betrachten von Fall x
+x = 122 #Einstellen, welchen Fall man naeher betrachten moechte
+bayesLukas$compdraw[[x]]$mu
+
+bayesLukas$deltadraw[x,]
+
+bayesLukas$compdraw[[x]]$rooti
+
+crossprod(bayesLukas$compdraw[[x]]$rooti)
+
+head(bayesLukas$betadraw[,,x])
+
+### Betas mit Konfidenzintervallen
+beta.post.mean <- apply(bayesLukas$betadraw, 1:2, mean)
+head(beta.post.mean)
+
+beta.post.q05 <- apply(bayesLukas$betadraw, 1:2, quantile, probs=c(0.05))
+beta.post.q95 <- apply(bayesLukas$betadraw, 1:2, quantile, probs=c(0.95))
+betas <- as.data.frame(rbind(q05=beta.post.q05[1,], mean=beta.post.mean[1,], q95=beta.post.q95[1,]))
+names(betas) <- c("Doppelseite_nein", "Scan_nein", "Eco_nein", "KpS_2Cent", "KpS_3Cent", "Loch_nein", "Sterne_3", "Sterne_4", "Sterne_4,5", "Preis_220", "Preis_233", "Preis_258", "Preis_290")
+betas
+
+### Funktion zur Vorhersage von Marktanteilen hypothetischer Drucker
+predict.hb.mnl <- function(betadraws, data) {
+  data.model <- model.matrix(~ Doppelseite + Scan + Eco + KpS + Loch + Sterne + Preis, data = data)
+  data.model <- data.model[,-1]
+  nresp <- dim(betadraws)[1]
+  ndraws <- dim(bayesLukas$betadraw)[3]
+  shares <- array(dim=c(nresp, nrow(data), ndraws))
+  for (d in 1:ndraws) {
+    for (i in 1:nresp) {
+      utility <- data.model %*% betadraws[i,,d]
+      shares[i,,d] = exp(utility) / sum(exp(utility))
+    }
+  }
+  shares.agg <- apply(shares, 2:3, mean)
+  cbind(share = apply(shares.agg, 1, mean),
+        pct = t(apply(shares.agg, 1, quantile, probs = c(0.05, 0.95))), data)
+}
+
+### Hypothetische Drucker !Es muss jedes Merkmal mindestens einmal vergeben werden
+sharesProducts <- as.data.frame(rbind(c("nein", "nein", "nein", "1 Cent", "nein", "2 Sterne", "220 Euro"),
+                                c("ja", "ja", "ja", "2 Cent", "ja", "4,5 Sterne", "290 Euro"),
+                                c("nein", "ja", "ja", "3 Cent", "ja", "4 Sterne", "258 Euro"),
+                                c("nein", "nein", "nein", "3 Cent", "ja", "3 Sterne", "233 Euro"),
+                                c("ja", "ja", "ja", "1 Cent", "ja", "4,5 Sterne", "198 Euro")))
+names(sharesProducts) <- names(dmz)[5:11]
+
+predict.hb.mnl(bayesLukas$betadraw, sharesProducts)
+
+## Ohne Zeitdruck
+doz <- read.csv2("Design ohne Zeitdruck.csv", stringsAsFactors = F)
+yoz <- read.csv2("yKeinZeitdruck.csv", stringsAsFactors = F)
+
+doz <- doz %>%
+  mutate(Doppelseite = as.factor(ifelse(Att.1...Doppelseitiges.Drucken == 1, "nein", "ja"))) %>% #Fuegt eine Spalte hinzu, in der die Auspraegungen der Variable Doppelseite ja oder nein sind
+  mutate(Scan = as.factor(ifelse(Att.2...Scan.Funktion == 1, "nein", "ja"))) %>% #S.o., Auspraegungen sind ebenfalls ja oder nein
+  mutate(Eco = as.factor(ifelse(Att.3...Eco.Modus == 1, "nein", "ja"))) %>% #S.o., Auspraegungen sind ebenfalls ja oder nein
+  mutate(KpS = as.factor(ifelse(Att.4...Kosten.pro.Seite..in.cent. == 1, "1 Cent", ifelse(Att.4...Kosten.pro.Seite..in.cent. == 2, "2 Cent", "3 Cent")))) %>% #S.o., mit den Auspraegungen 1 Cent, 2 Cent oder 3 Cent
+  mutate(Loch = as.factor(ifelse(Att.5...Heft..und.Lochfunktion == 1, "nein", "ja"))) %>% #S.o., mit den Auspraegungen ja oder nein
+  mutate(Sterne = as.factor(ifelse(Att.6...Sterne.Bewertung.von.1..schlecht..bis.5..gut. == 1, "2 Sterne",
+                            ifelse(Att.6...Sterne.Bewertung.von.1..schlecht..bis.5..gut. == 2, "3 Sterne",
+                            ifelse(Att.6...Sterne.Bewertung.von.1..schlecht..bis.5..gut. == 3, "4 Sterne", "4,5 Sterne"))))) %>% #S.o., mit den Auspraegungen 2 Sterne, 3 Sterne, 4 Sterne oder 4,5 Sterne
+  mutate(Preis = as.factor(ifelse(Att.7...Preis == 1, "198 Euro",
+                           ifelse(Att.7...Preis == 2, "220 Euro",
+                           ifelse(Att.7...Preis == 3, "233 Euro", 
+                           ifelse(Att.7...Preis == 4, "258 Euro", "290 Euro")))))) %>% #S.o., mit den Auspraegungen 198 Euro, 220 Euro, 233 Euro, 258 Euro oder 290 Euro
+  mutate(Choice = NA) %>% #Hinzufuegen einer Spalte, die spaeter aussagt, ob das Produkt gewaehlt wurde oder nicht (moegliche Auspraegungen dann 0 oder 1)
+  rename(i = X, ID = Version..0...Fixed.Task.) %>% #Um handlichere Namen zu bekommen
+  select(-Att.1...Doppelseitiges.Drucken, -Att.2...Scan.Funktion, -Att.3...Eco.Modus, -Att.4...Kosten.pro.Seite..in.cent., -Att.5...Heft..und.Lochfunktion, -Att.6...Sterne.Bewertung.von.1..schlecht..bis.5..gut., -Att.7...Preis) #Loeschen der vorherigen (numerischen) Variablen, um Übersichtlichkeit zu gewinnen
+
+### Recodieren der Antworten von 4 auf 0, da spaeter mit dem Rest der Division gerechnet wird + Sortieren des Datensatzes
+yoz <- yoz %>%
+  mutate(CBC_Random1 = ifelse(CBC_Random1 == 4, 0, CBC_Random1)) %>%
+  mutate(CBC_Random2 = ifelse(CBC_Random2 == 4, 0, CBC_Random2)) %>%
+  mutate(CBC_Random3 = ifelse(CBC_Random3 == 4, 0, CBC_Random3)) %>%
+  mutate(CBC_Random4 = ifelse(CBC_Random4 == 4, 0, CBC_Random4)) %>%
+  mutate(CBC_Random5 = ifelse(CBC_Random5 == 4, 0, CBC_Random5)) %>%
+  mutate(CBC_Random6 = ifelse(CBC_Random6 == 4, 0, CBC_Random6)) %>%
+  mutate(CBC_Random7 = ifelse(CBC_Random7 == 4, 0, CBC_Random7)) %>%
+  mutate(CBC_Random8 = ifelse(CBC_Random8 == 4, 0, CBC_Random8)) %>%
+  mutate(CBC_Random9 = ifelse(CBC_Random9 == 4, 0, CBC_Random9)) %>%
+  mutate(CBC_Random10 = ifelse(CBC_Random10 == 4, 0, CBC_Random10)) %>%
+  mutate(CBC_Random11 = ifelse(CBC_Random11 == 4, 0, CBC_Random11)) %>%
+  mutate(CBC_Random12 = ifelse(CBC_Random12 == 4, 0, CBC_Random12)) %>%
+  select(-CBC_Fixed1, -CBC_Fixed2, everything(), CBC_Fixed1, CBC_Fixed2) #Sorgt dafuer, dass die Fixed-Spalten am Ende stehen
+
+### Funktion zur Ermittlung, ob der Proband die Produktalternative gewaehlt hat oder nicht
+func <- function(i) {
+  zeile = ceiling((i - 8) / 48)
+  spalte = ifelse(ceiling(((i - 8) / 4) %% 12) == 0, 12, ceiling(((i - 8) / 4) %% 12))
+  c = ifelse(i %% 4 == yoz[zeile, spalte + 2], 1, 0)
+  return (c)
+}
+
+### Pruefen anhand der Funktion, ob der Proband die Produktalternative gewaehlt hat <- erfolgt zeilenweise
+for (i in 9:(48*nrow(yoz) + 8)) {
+  doz$Choice[i] = func(i)
+}
+
+### Loeschen von Zeilen ohne gueltiger Antwort
+doz <- doz %>%
+  filter(!is.na(Choice))
+
+### Schreibt in die erste Zeile eines Auswahlkatalogs die getroffene Wahl
+#### Vektor mit den getroffenen Auswahlen
+bayes <- NULL
+for (i in 1:(nrow(doz)/4)) {
+  auswahl <- 0
+  none <- T
+  for (j in ((i-1)*4+1):((i-1)*4+4)) {
+    if(doz$Choice[j] == 1) {
+      bayes <- c(bayes, j - ((i-1)*4))
+      none <- F
+    }
+  }
+  if (none) {
+    bayes <- c(bayes, floor(runif(1, min = 1, max = 4))) #!!!Weil das Vorgehen keine None-Option beruecksichtigt
+  }
+}
+
+#### Schreiben des Vektors in die erste Zeile des Auswahlkatalogs
+bayesIndex = 1
+for (i in 1:nrow(doz)) {
+  if (i %% 4 == 1) {
+    doz$Choice[i] = bayes[bayesIndex]
+    bayesIndex = bayesIndex + 1
+  } else {
+    doz$Choice[i] = 0
+  }
+}
+
+### Data Frame, in dem jede moegliche Auswahl eine Spalte darstellt (mit 0 oder 1)
+doz.coded <- model.matrix(~ Doppelseite + Scan + Eco + KpS + Loch + Sterne + Preis, data = doz)
+doz.coded <- doz.coded[, -1] #Loeschen des Intercepts
+
+doz.data <- cbind(doz[,2:4], doz.coded, doz[,12]) #Verbinden der Spalten fuer ID, Frage und Auswahl mit den Auspraegungen des jeweiligen Druckers und der Spalte mit der getroffenen Auswahl
+names(doz.data)[length(names(doz.data))] <- "Choice" #Umbenennen der letzten Spalte in "Choice"
+
+###Liste mit Iterationen (R und und use koennen weitestgehend beliebig manipuliert werden)
+bayesLukas <- choicemodelr(data = doz.data, xcoding=rep(1,13), mcmc = list(R = 10000, use = 5000), options = list(save = T))
+
+### Betrachten von Fall x
+x = 122 #Einstellen, welchen Fall man naeher betrachten moechte
+bayesLukas$compdraw[[x]]$mu
+
+bayesLukas$deltadraw[x,]
+
+bayesLukas$compdraw[[x]]$rooti
+
+crossprod(bayesLukas$compdraw[[x]]$rooti)
+
+head(bayesLukas$betadraw[,,x])
+
+### Betas mit Konfidenzintervallen
+beta.post.mean <- apply(bayesLukas$betadraw, 1:2, mean)
+head(beta.post.mean)
+
+beta.post.q05 <- apply(bayesLukas$betadraw, 1:2, quantile, probs=c(0.05))
+beta.post.q95 <- apply(bayesLukas$betadraw, 1:2, quantile, probs=c(0.95))
+betasOZ <- as.data.frame(rbind(q05=beta.post.q05[1,], mean=beta.post.mean[1,], q95=beta.post.q95[1,]))
+names(betasOZ) <- c("Doppelseite_nein", "Scan_nein", "Eco_nein", "KpS_2Cent", "KpS_3Cent", "Loch_nein", "Sterne_3", "Sterne_4", "Sterne_4,5", "Preis_220", "Preis_233", "Preis_258", "Preis_290")
+betasOZ
+
+### Hypothetische Drucker !Es muss jedes Merkmal mindestens einmal vergeben werden, ansonsten Fehlermeldung
+sharesProducts <- as.data.frame(rbind(c("nein", "nein", "nein", "1 Cent", "nein", "2 Sterne", "220 Euro"),
+                                      c("ja", "ja", "ja", "2 Cent", "ja", "4,5 Sterne", "290 Euro"),
+                                      c("nein", "ja", "ja", "3 Cent", "ja", "4 Sterne", "258 Euro"),
+                                      c("nein", "nein", "nein", "3 Cent", "ja", "3 Sterne", "233 Euro"),
+                                      c("ja", "ja", "ja", "1 Cent", "ja", "4,5 Sterne", "198 Euro")))
+names(sharesProducts) <- names(dmz)[5:11]
+
+predict.hb.mnl(bayesLukas$betadraw, sharesProducts)
+
+
+tbl <- as.table(rbind(c(0,0), c(0,0)))
+
+noneOptionMitZeitdruck <- 0
+for (i in 1:ncol(ymz)) {
+  for (j in 1:nrow(ymz)) {
+    if (ymz[j,i] == 0) { 
+      tbl[1,1] = tbl[1,1] + 1
+    } else {
+      tbl[2,1] = tbl[2,1] + 1
+    }
+  }
+}
+
+for (i in 1:ncol(yoz)) {
+  for (j in 1:nrow(yoz)) {
+    if (yoz[j,i] == 0) { 
+      tbl[1,2] = tbl[1,2] + 1
+    } else {
+      tbl[2,2] = tbl[2,2] + 1
+    }
+  }
+}
+
+test <- chisq.test(tbl)
+test
+
+effect <- as.numeric(sqrt(test$statistic/sum(test$observed)))
+effect
+
